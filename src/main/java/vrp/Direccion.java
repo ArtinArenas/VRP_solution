@@ -1,15 +1,23 @@
 package vrp;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+/**
+ * Dirección / ubicación.
+ *
+ *  - name         : texto de la dirección tal como llega del archivo de importación.
+ *                   Se CONSERVA luego de geocodificar.
+ *  - lat / lon    : completados por Nominatim.
+ *  - display_name : completado por Nominatim.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Direccion {
-    // Atributos con los mismos nombres del JSON
+
     private String name;
     private double lat;
     private double lon;
     private String display_name;
 
-    // Constructor vacío para Jackson
     public Direccion() {}
 
     public Direccion(String name, double lat, double lon, String display_name) {
@@ -19,7 +27,6 @@ public class Direccion {
         this.display_name = display_name;
     }
 
-    // Getters y Setters actualizados
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
