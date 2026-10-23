@@ -1,5 +1,8 @@
 package vrp;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -7,80 +10,94 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.io.FileInputStream;
 import java.util.Properties;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class NominatimClient {
 
     private static final HttpClient client = HttpClient.newHttpClient();
+    private static final ObjectMapper mapper = new ObjectMapper();
 
     private static final String API_URL;
     private static final String EMAIL;
 
-    // Se ejecuta una sola vez al inicializar la clase
     static {
         Properties config = new Properties();
-
-        try (FileInputStream file =
-                     new FileInputStream("config.properties")) {
-
+        try (FileInputStream file = new FileInputStream("config.properties")) {
             config.load(file);
-
             API_URL = config.getProperty("Nominatim.url");
-            EMAIL = config.getProperty("Nominatim.email");
-
+            EMAIL   = config.getProperty("Nominatim.email");
         } catch (IOException e) {
             throw new ExceptionInInitializerError(e);
         }
     }
 
-    public static Direccion getDireccion(String direccion) throws IOException, InterruptedException {
-        Direccion resp = new Direccion();
+    /**
+     * Geocodifica la dirección del cliente.
+     *  - Entrada: cliente.getName()  →  texto de la dirección.
+     *  - Salida:  cliente.lat / lon / display_name  completados.
+     *             cliente.getName() se PRESERVA (dirección original del archivo).
+     *
+     * @return el mismo Cliente, ya geocodificado.
+     */
+    public static Cliente geocodificar(Cliente cliente)
+            throws IOException, InterruptedException {
 
-        String direccionCodificada = URLEncoder.encode(
-                direccion, StandardCharsets.UTF_8
-        );
+        String direccion = cliente.getName();
+
+        if (direccion == null || direccion.isBlank()) {
+            throw new IllegalArgumentException(
+                    "El cliente '" + cliente.getNombre() + "' no tiene dirección");
+        }
+
+        String codificada = URLEncoder.encode(direccion, StandardCharsets.UTF_8);
 
         String url = API_URL
                 + "/search"
-                + "?q=" + direccionCodificada
+                + "?q=" + codificada
                 + "&format=jsonv2"
                 + "&limit=1";
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("User-Agent", "MiAplicacionJava/1.0 (contacto: " + EMAIL + ")")
-                .header("Accept", "application/json")
-                .GET()
-                .build();
+        System.out.println("\nURL a consultar: " + url);
 
-        HttpResponse<String> response = client.send(
-                request,
-                HttpResponse.BodyHandlers.ofString()
-        );
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent",
+                            "TSP_test/1.0 (contacto: " + EMAIL + ")")
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(
+                    request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
+            System.out.println("\nURL a consultar: ");
+            throw new IOException("Error HTTP Nominatim: " + response.statusCode());
+        }
+
+        // Nominatim devuelve un array; tomamos el primer resultado.
+        Direccion[] resultados =
+                mapper.readValue(response.body(), Direccion[].class);
+
+        if (resultados.length == 0) {
             throw new IOException(
-                    "Error HTTP: " + response.statusCode()
-            );
+                    "Nominatim no encontró resultado para: " + direccion);
         }
 
-        //Transformo él response en un objeto Direccion
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
+        Direccion r = resultados[0];
 
-            // Leer como array debido a los corchetes [ ]
-            Direccion[] direcciones = objectMapper.readValue(response.body(), Direccion[].class);
+        // Copiamos SOLO los datos geocodificados.
+        // cliente.name se mantiene con el texto original del archivo.
+        cliente.setLat(r.getLat());
+        cliente.setLon(r.getLon());
+        cliente.setDisplay_name(r.getDisplay_name());
 
-            if (direcciones.length > 0) {
-                resp = direcciones[0];
-            }
-
-        } catch (Exception e) {
-            e.printStackTrace();
+        return cliente;
         }
-
-        return resp;
+        catch (Exception e) {
+            System.out.println("\nNo se pudo enviar la petición: " + e.getMessage());
+            throw new ExceptionInInitializerError(e);
+        }
     }
 }
