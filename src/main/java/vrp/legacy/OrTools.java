@@ -1,4 +1,4 @@
-package vrp;
+package vrp.legacy;
 
 import com.google.ortools.Loader;
 import com.google.ortools.constraintsolver.Assignment;

@@ -1,4 +1,4 @@
-package vrp;
+package vrp.legacy;
 
 import java.io.BufferedReader;
 import java.io.IOException;

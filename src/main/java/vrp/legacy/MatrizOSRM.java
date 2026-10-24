@@ -1,4 +1,4 @@
-package vrp;
+package vrp.legacy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

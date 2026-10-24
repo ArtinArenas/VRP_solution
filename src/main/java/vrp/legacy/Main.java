@@ -1,4 +1,4 @@
-package vrp;
+package vrp.legacy;
 
 import java.util.List;
 
