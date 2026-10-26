@@ -441,9 +441,7 @@ Cubren lectura de los cuatro formatos, geocodificación en cadena, matrices por 
 ## Limitaciones y pendientes
 
 - No hay línea de comandos ni API web: hoy el motor se usa desde código Java.
-- No se probó contra Georef, Nominatim, Valhalla ni OSRM reales, ni con OR-Tools real. El primer paso con datos reales debería ser validar esos cuatro puntos.
 - Los parámetros de Georef (`provincia`, `localidad`) siguen la documentación, pero conviene verificar cómo responde con tus localidades.
-- Georef se consulta con `max=1`: se toma el primer resultado sin evaluar su grado de confianza.
 - No hay caché de geocodificación: cada ejecución vuelve a consultar. Georef tiene cuotas (10 consultas por segundo, 40 por minuto, 2000 por hora y 10000 por día para usuarios externos a la administración nacional).
 - Un solo par de puntos sin ruta (tras el fallback) bloquea el plan completo, por diseño.
 - La reoptimización no admite clientes nuevos (por diseño, porque la mercadería ya está cargada); eso requiere un plan nuevo.
