@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
+
 import vrp.engine.geocoding.GeocodingProvider;
 import vrp.engine.geocoding.MotivoGeo;
 import vrp.engine.geocoding.ResultadoGeo;
@@ -176,11 +177,11 @@ final class Fakes {
 
     static Deposito deposito() {
         return new Deposito("D1", "Central", new DireccionPostal("Av. Corrientes 1000", "CABA", "Ciudad Autonoma de Buenos Aires"),
-                new Coordenada(-34.60, -58.38));
+                new Coordenada(-34.60, -58.38), LocalTime.of(8, 0), LocalTime.of(18, 0), -10);
     }
 
     static Vehiculo vehiculo(String id, int capacidad) {
-        return new Vehiculo(id, id, capacidad, LocalTime.of(8, 0), LocalTime.of(18, 0), "D1", null);
+        return new Vehiculo(id, id, capacidad, LocalTime.of(8, 0), LocalTime.of(18, 0), "D1", "D1", -1);
     }
 
     static Entrega entrega(String id, double lat, double lon, int demanda) {

@@ -208,4 +208,9 @@ public final class Planificador {
         return new ErrorDireccion(id, tipo, direccion, r.resultado().motivo(), r.resultado().detalle(),
                 r.proveedoresIntentados());
     }
+
+    // Getters para acceso desde VrpEngine facade
+    public GeocodingChain geocodificador() { return geocodificador; }
+    public RoutingMatrixProvider matriz() { return matriz; }
+    public RouteGeometryProvider geometria() { return geometria; }
 }

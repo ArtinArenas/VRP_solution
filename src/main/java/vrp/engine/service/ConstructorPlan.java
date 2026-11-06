@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import vrp.engine.model.Coordenada;
+import vrp.engine.model.Deposito;
 import vrp.engine.model.Entrega;
 import vrp.engine.model.EstadoParada;
 import vrp.engine.model.ProblemaVRP;
@@ -70,7 +71,7 @@ final class ConstructorPlan {
             List<Parada> paradas = new ArrayList<>();
             for (int k = 0; k < sim.pasos().size(); k++) {
                 Simulador.Paso paso = sim.pasos().get(k);
-                paradas.add(new Parada(k + 1, modelo.entregaDeNodo(paso.nodo()), EstadoParada.PENDIENTE,
+                paradas.add(Parada.entrega(k + 1, modelo.entregaDeNodo(paso.nodo()), EstadoParada.PENDIENTE,
                         aFecha(fecha, paso.inicioServicioSeg()), paso.distanciaM(), paso.duracionSeg(),
                         tramos == null ? null : tramos.get(k)));
             }
