@@ -1,6 +1,8 @@
 # VRP Engine
 
-Motor de enrutamiento de vehículos (VRP) para repartos en Argentina. Librería Java modular, testeable y diseñada para ser consumida por una API web. JSON es el formato de intercambio.
+Motor de enrutamiento de vehículos (VRP) para logística. Librería Java modular, testeable y diseñada para ser consumida por una API web. JSON es el formato de intercambio.
+
+**Novedad v2.0**: El motor ahora es un **motor de ruteo puro** que trabaja exclusivamente con coordenadas (latitud/longitud). La geocodificación se ha extraído completamente y debe realizarse externamente antes de usar el motor.
 
 ## Contenido
 
@@ -8,155 +10,150 @@ Motor de enrutamiento de vehículos (VRP) para repartos en Argentina. Librería 
 2. [Estado actual](#estado-actual)
 3. [Requisitos](#requisitos)
 4. [Configuración](#configuración)
-5. [Formatos de entrada](#formatos-de-entrada)
-6. [Flujo de ejecución en dos fases](#flujo-de-ejecución-en-dos-fases)
-7. [Uso desde Java (Fachada VrpEngine)](#uso-desde-java-fachada-vrpengine)
-8. [Formato de salida](#formato-de-salida)
-9. [Reoptimización durante la jornada](#reoptimización-durante-la-jornada)
-10. [Cómo decide el solver](#cómo-decide-el-solver)
-11. [Estructura del proyecto](#estructura-del-proyecto)
-12. [Tests](#tests)
-13. [Limitaciones y pendientes](#limitaciones-y-pendientes)
+5. [Motor de Geocodificación (Nuevo)](#motor-de-geocodificación-nuevo)
+6. [Formatos de entrada](#formatos-de-entrada)
+7. [Flujo de ejecución](#flujo-de-ejecución)
+8. [Uso desde Java (Fachada VrpEngine)](#uso-desde-java-fachada-vrpengine)
+9. [Formato de salida](#formato-de-salida)
+10. [Reoptimización durante la jornada](#reoptimización-durante-la-jornada)
+11. [Cómo decide el solver](#cómo-decide-el-solver)
+12. [Estructura del proyecto](#estructura-del-proyecto)
+13. [Tests](#tests)
+14. [Limitaciones y pendientes](#limitaciones-y-pendientes)
 
 ## Qué hace
 
-- **Estructura multi-módulo Maven**: `vrp-engine` (librería) + `vrp-manual-tests` (pruebas con `Main`).
-- **Fachada `VrpEngine`**: expone funciones separadas para geocodificar, obtener matriz, calcular rutas, codificar/decodificar planes.
-- Lee clientes desde **CSV, Excel (.xls/.xlsx), XML o JSON**, con dirección, localidad y provincia en campos separados.
-- **Geocodificación** con Georef Argentina (POST por lotes, hasta 1000/día) y Nominatim local como fallback. Google excluido.
+- **Fachada `VrpEngine`**: expone funciones para leer archivos, calcular matriz de distancias/tiempos, planificar rutas, codificar/decodificar planes.
+- Lee clientes desde **CSV, Excel (.xls/.xlsx), XML o JSON** con coordenadas obligatorias (lat/lon).
 - Calcula **matriz de distancias/tiempos** con Valhalla (primario) y OSRM (fallback).
-- Resuelve con **OR-Tools** para `n` vehículos heterogéneos: capacidad, ventanas, tiempos de servicio, prioridades, **balanceo opcional**, **máx. viajes por vehículo**.
+- Resuelve con **OR-Tools** para `n` vehículos heterogéneos: capacidad, ventanas, tiempos de servicio, prioridades, **balanceo opcional**. Modelo `maxViajes` existe en vehículo (solver pendiente).
 - **Depósitos con ventana horaria y tiempo de estadía** (carga/descarga). Visitas a depósito en mitad de ruta permitidas.
 - Paradas con tipo `ENTREGA` o `DEPOSITO`.
 - Si no puede atender un cliente, lo informa como omisión y exige confirmación explícita.
 - Plan en JSON con estado por parada; **reoptimización mid-jornada** desde posición GPS del chofer.
+- **Logging SLF4J** para cálculo de matrices y ejecución del solver OR-Tools.
+- **Configuración vía variables de entorno** con fallback a `config.properties`.
 
 ## Estado actual
 
-El motor está implementado y probado con proveedores simulados (54 tests).
-
 | Componente | Estado |
 |---|---|
-| Modelos, validaciones, lectores, cadenas de proveedores, simulación, armado del plan, reoptimización | ✅ Implementado y cubierto por tests |
-| Georef (lotes 1000), Nominatim, Valhalla, OSRM (clientes HTTP) | ✅ Implementado, probado con respuestas simuladas |
-| Solver OR-Tools (`OrToolsVrpSolver`) | ✅ Implementado, test con OR-Tools nativo (`OrToolsVrpSolverTest`) |
-| Fachada `VrpEngine` con funciones separadas | ✅ Implementado |
-| API web, línea de comandos, persistencia | ❌ No existen todavía (diseñado para API) |
-
-Ver [Limitaciones y pendientes](#limitaciones-y-pendientes).
+| Modelos (coordenadas obligatorias), validaciones, lectores, matriz, solver, plan, reoptimización | ✅ Implementado |
+| Valhalla, OSRM (clientes HTTP nativos Java 25) | ✅ Implementado |
+| Solver OR-Tools (`OrToolsVrpSolver`) | ✅ Implementado |
+| Fachada `VrpEngine` pura (sin geocodificación) | ✅ Implementado |
+| Múltiples viajes por vehículo (`maxViajes`) | ⏳ Modelo listo, solver pendiente |
+| API web, línea de comandos, persistencia | ❌ No existen (diseñado para API) |
 
 ## Requisitos
 
-- **Java 17** y Maven 3.9+.
-- Dependencias (en `pom.xml` padre): Jackson 2.22, Apache POI 5.5, Commons CSV 1.14, OR-Tools Java 9.10, JUnit 5.11.
-- Servicios externos:
-  - **Georef Argentina**: `https://apis.datos.gob.ar/georef/api/v2.0` (público, cuota 1000/día).
-  - **Nominatim** local (fallback, opcional).
-  - **Valhalla** y/o **OSRM** (al menos uno obligatorio para ruteo).
+- **Java 25 LTS** y Maven 3.9+.
+- Dependencias: Jackson 2.22, Apache POI 5.5, Commons CSV 1.14, OR-Tools Java 9.15, SLF4J 2.0, JUnit 5.11.
+- Servicios externos (al menos uno obligatorio para ruteo):
+  - **Valhalla** local (puerto 8002 por defecto)
+  - **OSRM** local (puerto 5000 por defecto)
 
 ## Configuración
 
-El motor lee un archivo `config.properties` (no versionado, está en `.gitignore`). Ejemplo:
+El motor lee un archivo `config.properties` (no versionado, está en `.gitignore`). También se puede configurar mediante **variables de entorno** (tienen prioridad sobre el archivo).
+
+Variables de entorno soportadas:
+- `VALHALLA_URL` - URL base de Valhalla (ej: `http://localhost:8002`)
+- `OSRM_URL` - URL base de OSRM (ej: `http://localhost:5000`)
+- `VALHALLA_COSTING` - Perfil de ruteo Valhalla (por defecto `auto`)
+- `MATRIZ_TAMANO_BLOQUE` - Tamaño de bloque para matrices (por defecto 50)
+- `HTTP_TIMEOUT_SEG` - Timeout HTTP en segundos (por defecto 30)
+- `SOLVER_OBJETIVO` - `DISTANCIA` o `TIEMPO` (por defecto `DISTANCIA`)
+- `SOLVER_TIEMPO_LIMITE` - Tiempo máximo solver en segundos (por defecto 10)
+- `SOLVER_PENALIZACION_BASE` - Penalización base por omisión (por defecto 10000000)
+- `SOLVER_COEFICIENTE_BALANCEO` - Coeficiente de balanceo (por defecto 0)
+
+Ejemplo `config.properties`:
 
 ```properties
-# Geocodificación
-Georef.url=https://apis.datos.gob.ar/georef/api/v2.0
-Nominatim.url=http://192.168.0.10:8080
-Nominatim.email=tu@correo.com
-Nominatim.pausaMs=0
-
-# Ruteo (al menos uno de los dos)
-Valhalla.url=http://192.168.0.10:8002
-OSRM.url=http://192.168.0.10:5000
+# Valhalla (motor de ruteo principal - requiere instancia local)
+Valhalla.url=http://localhost:8002
 Valhalla.costing=auto
+
+# OSRM (motor de ruteo alternativo - requiere instancia local)
+OSRM.url=http://localhost:5000
+
+# Tamaño de bloques para matrices grandes (evita límites de URL)
 Matriz.tamanoBloque=50
 
-# Solver
+# Timeout HTTP en segundos
+Http.timeoutSeg=30
+
+# Solver OR-Tools
 Solver.objetivo=DISTANCIA
 Solver.tiempoLimiteSeg=10
 Solver.penalizacionBase=10000000
 Solver.coeficienteBalanceo=0
-
-# HTTP
-Http.timeoutSeg=30
 ```
 
-| Clave | Por defecto | Descripción |
-|---|---|---|
-| `Georef.url` | URL pública de Georef | Base de la API de Georef (respeta cuota 1000/día) |
-| `Nominatim.url` | sin definir | Si no se define, no se usa Nominatim |
-| `Nominatim.email` | sin definir | Se envía como contacto en cada consulta |
-| `Nominatim.pausaMs` | `0` | Pausa entre consultas (solo necesaria con instancias públicas) |
-| `Valhalla.url` / `OSRM.url` | sin definir | Se usan en ese orden; Valhalla es el primario |
-| `Valhalla.costing` | `auto` | Perfil de ruteo de Valhalla |
-| `Matriz.tamanoBloque` | `50` | Cantidad de puntos por bloque al pedir la matriz |
-| `Solver.objetivo` | `DISTANCIA` | `DISTANCIA` o `TIEMPO` |
-| `Solver.tiempoLimiteSeg` | `10` | Tiempo máximo de búsqueda de OR-Tools |
-| `Solver.penalizacionBase` | `10000000` | Costo de omitir una entrega de prioridad 1 |
-| `Solver.coeficienteBalanceo` | `0` | Si es mayor que 0, penaliza rutas desparejas |
-| `Http.timeoutSeg` | `30` | Tiempo máximo por consulta HTTP |
-
 ## Formatos de entrada
+
+**Importante**: Todos los formatos requieren **coordenadas obligatorias** (`lat`/`lon` o `latitud`/`longitud`) para cada entrega y depósito. No hay geocodificación interna.
 
 ### Tabulares (CSV, Excel, XML)
 
 Traen **solo los clientes**. La fecha, los depósitos y los vehículos se pasan por argumento (`ContextoOperativo`).
 
-Columnas reconocidas (no distinguen mayúsculas, tildes, espacios ni guiones bajos, así que `servicio_min`, `Servicio Min` y `servicioMin` son equivalentes):
+Columnas reconocidas (no distinguen mayúsculas, tildes, espacios ni guiones bajos):
 
 | Columna | Obligatoria | Descripción |
 |---|---|---|
-| `direccion` | Sí (si no hay lat/lon) | Calle y altura |
-| `provincia` | Sí (si no hay lat/lon) | Nombre oficial, por ejemplo `Buenos Aires` |
-| `localidad` | Recomendada | Mejora la precisión de Georef |
 | `id` | No | Si falta, se genera `E1`, `E2`, ... según la fila |
 | `nombre` | No | Nombre del cliente |
+| `lat` / `latitud` | **Sí** | Latitud (decimal) |
+| `lon` / `lng` / `longitud` | **Sí** | Longitud (decimal) |
 | `demanda` | No | Unidades que ocupa la entrega (por defecto 0) |
-| `servicio_min` | No | Minutos de servicio en el cliente |
-| `ventana_desde` / `ventana_hasta` | No | Ventana horaria `HH:mm` |
+| `servicio_min` / `servicio` / `tiempo_de_servicio` | No | Minutos de servicio en el cliente |
+| `ventana_desde` / `desde` | No | Ventana horaria inicio `HH:mm` |
+| `ventana_hasta` / `hasta` | No | Ventana horaria fin `HH:mm` |
 | `prioridad` | No | Entero, mayor es más importante (por defecto 1) |
-| `lat` / `lon` | No | Si vienen, no se geocodifica ese cliente |
 
 CSV: el separador (`;` o `,`) se detecta solo. Excel: se lee la primera hoja, con encabezados en la primera fila. XML: cada elemento con campos simples es un registro.
 
 ```csv
-id;nombre;direccion;localidad;provincia;demanda;servicio_min;ventana_desde;ventana_hasta;prioridad
-E1;Juan Perez;Av. Mitre 123;Merlo;Buenos Aires;2;10;09:00;12:00;3
-E2;Ana Gomez;Calle 9 45;Moron;Buenos Aires;1;5;;;1
+id;nombre;lat;lon;demanda;servicio_min;ventana_desde;ventana_hasta;prioridad
+E1;Juan Perez;-34.6412;-58.5923;2;10;09:00;12:00;3
+E2;Ana Gomez;-34.6521;-58.5812;1;5;;;1
 ```
 
 ```xml
 <entregas>
   <entrega>
+    <id>E1</id>
     <nombre>Juan Perez</nombre>
-    <direccion>Av. Mitre 123</direccion>
-    <localidad>Merlo</localidad>
-    <provincia>Buenos Aires</provincia>
+    <lat>-34.6412</lat>
+    <lon>-58.5923</lon>
     <demanda>2</demanda>
+    <servicio_min>10</servicio_min>
   </entrega>
 </entregas>
 ```
 
 ### JSON (formato completo)
 
-Incluye fecha, depósitos, vehículos y entregas. Si falta alguna de las tres primeras, se completa con el contexto operativo pasado por argumento.
+Incluye fecha, depósitos, vehículos y entregas. Si falta alguna de las tres primeras, se completa con el contexto operativo pasado por argumento. **Todos los depósitos y entregas deben traer `coordenada`**.
 
 ```json
 {
   "fecha": "2026-10-26",
   "depositos": [
     { "id": "D1", "nombre": "Central",
-      "direccion": { "direccion": "Av. Rivadavia 17000", "localidad": "Haedo", "provincia": "Buenos Aires" } }
+      "coordenada": { "lat": -34.6410, "lon": -58.5900 },
+      "ventanaDesde": "06:00", "ventanaHasta": "22:00", "estadiaMin": 30 }
   ],
   "vehiculos": [
-    { "id": "V1", "nombre": "Camion 1", "capacidad": 20,
+    { "id": "V1", "nombre": "Camión 1", "capacidad": 20,
       "horaSalida": "08:00", "horaFin": "18:00",
-      "depositoSalidaId": "D1", "depositoLlegadaId": "D1" },
-    { "id": "V2", "nombre": "Camioneta", "capacidad": 8, "horaSalida": "09:00", "depositoSalidaId": "D1" }
+      "depositoSalidaId": "D1", "depositoLlegadaId": "D1", "maxViajes": 1 }
   ],
   "entregas": [
     { "id": "E1", "nombre": "Juan Perez",
-      "direccion": { "direccion": "Av. Mitre 123", "localidad": "Merlo", "provincia": "Buenos Aires" },
+      "coordenada": { "lat": -34.6412, "lon": -58.5923 },
       "demanda": 3, "servicioMin": 10,
       "ventana": { "desde": "09:00", "hasta": "12:30" }, "prioridad": 2 }
   ]
@@ -164,36 +161,159 @@ Incluye fecha, depósitos, vehículos y entregas. Si falta alguna de las tres pr
 ```
 
 Reglas de los vehículos y depósitos:
-
 - `horaSalida` es obligatoria y es desde donde se calculan los horarios y las ventanas.
 - `horaFin` es opcional y funciona como límite de jornada.
 - `depositoLlegadaId` es opcional: si falta, el vehículo vuelve al mismo depósito del que salió.
 - `depositoSalidaId` es obligatorio solo si hay más de un depósito.
-- Cualquier depósito o entrega puede traer `coordenada` (`{"lat": ..., "lon": ...}`) y en ese caso no se geocodifica.
+- **Coordenada obligatoria** en depósitos y entregas.
 
-## Flujo de ejecución en dos fases
+## Motor de Geocodificación (Nuevo)
 
-El motor nunca lanza excepciones por datos inválidos: devuelve resultados estructurados, y cada fase actúa como una compuerta.
+El motor de geocodificación es un componente **separado e independiente** del VRP Engine. Se encarga exclusivamente de recibir direcciones y devolver coordenadas. No procesa archivos, solo direcciones.
+
+### Características principales
+
+- **Cadena de proveedores configurable**: Georef (principal) → Nominatim (fallback), orden fácilmente modificable
+- **Fallback inteligente**: El proveedor principal resuelve lo que puede; solo los fallos pasan al siguiente
+- **Manejo de cuotas**: Georef respeta cuota diaria (1000); si se excede, el exceso va directo al fallback
+- **Batching automático**: Agrupa en lotes según capacidad del proveedor (Georef: 100 por request)
+- **Rate limiting**: Nominatim configurable con pausa entre requests
+- **Logging SLF4J**: Trazabilidad completa de qué proveedor resolvió cada dirección
+- **Configuración por variables de entorno** con fallback a `geocoding.properties`
+
+### Proveedores incluidos
+
+| Proveedor | Rol | Cuota | Batch | Rate Limit |
+|---|---|---|---|---|
+| **Georef** (datos.gob.ar) | Principal | 1000/día | 100 por request | No |
+| **Nominatim** (local) | Fallback | Sin cuota dura | No (1 por request) | Configurable (pausaMs) |
+
+### Uso desde Java
+
+```java
+// 1. Configurar (archivo + variables de entorno)
+GeocodingConfig cfg = GeocodingConfig.desdeArchivo(Path.of("geocoding.properties"));
+GeocodingEngine engine = GeocodingEngine.crear(cfg);
+
+// 2. Geocodificar una dirección
+Direccion dir = Direccion.de("Av. Rivadavia 17000", "Haedo", "Buenos Aires");
+ResultadoGeocodificacion resultado = engine.geocodificar("CLIENTE-1", dir);
+
+if (resultado.esExitoso()) {
+    Coordenada coord = resultado.coordenada();  // lat/lon listas para VRP Engine
+    System.out.println("Resuelto por: " + resultado.proveedor()); // "georef" o "nominatim"
+} else {
+    System.err.println("Fallo: " + resultado.motivoFallo().descripcion());
+}
+
+// 3. Geocodificar múltiples direcciones (una sola llamada)
+List<Direccion> direcciones = List.of(dir1, dir2, dir3, ...);
+Map<String, ResultadoGeocodificacion> resultados = engine.geocodificarDirecciones(direcciones);
+
+// 4. Solo exitosas (lanza excepción si hay fallos)
+Map<String, Coordenada> coords = engine.geocodificarExigiendoExito(solicitudes);
+```
+
+### Flujo interno de la cadena
 
 ```
-Archivo -> Lectura y validación -> FASE 1: geocodificación -> FASE 2: ruteo y asignación -> Confirmación
+Direcciones
+    │
+    ▼
+┌─────────────────────┐
+│   GEOREF (Principal)│  ◄── Cuota 1000/día, lotes de 100
+│  - Resuelve válidas │
+│  - Fallos → next    │
+│  - Exceso cuota → next
+└─────────────────────┘
+    │
+    ▼ (solo fallos + exceso cuota)
+┌─────────────────────┐
+│  NOMINATIM (Fallback)│ ◄── Sin cuota, rate-limited
+│  - Resuelve resto   │
+│  - Fallos finales   │
+└─────────────────────┘
+    │
+    ▼
+Resultados consolidados (mejor error por dirección)
 ```
 
-**Lectura y validación** (`ResultadoLectura`): errores por fila o por campo (dirección faltante, ids duplicados, ventana invertida, vehículo sin hora de salida, depósito inexistente, etc.).
+### Configuración (geocoding.properties)
 
-**Fase 1: geocodificación** (`Planificador.geocodificar`). Intenta Georef por lotes de hasta 1000 direcciones. Lo que Georef no resuelve va a Nominatim. Se descartan coordenadas fuera de Argentina. Resultados posibles:
+```properties
+# Georef Argentina (principal, hasta 1000 consultas/día)
+Georef.url=https://apis.datos.gob.ar/georef/api/v2.0
 
-- `Geocodificado`: todo resuelto, trae el problema con coordenadas.
-- `DireccionesInvalidas`: lista de errores por dirección (motivo, detalle y proveedores intentados). El proceso se detiene.
-- `ProblemaInvalido`: datos estructurales incorrectos.
+# Nominatim local (fallback)
+Nominatim.url=http://localhost:8080
+Nominatim.email=tu@email.com
+Nominatim.pausaMs=1000
 
-**Fase 2: ruteo y asignación** (`Planificador.planificar`). Solo se ejecuta con todas las coordenadas válidas. Pide la matriz a Valhalla y completa los pares sin ruta con OSRM. Resultados posibles:
+# Timeout HTTP en segundos
+Http.timeoutSeg=30
+```
 
-- `RutaImposible`: quedan pares de puntos sin ruta incluso tras el fallback. No se avanza y se informa qué pares son.
+### Variables de entorno (prioridad sobre archivo)
+
+- `GEOREF_URL` - URL base de Georef
+- `NOMINATIM_URL` - URL base de Nominatim
+- `NOMINATIM_EMAIL` - Email de contacto para User-Agent
+- `NOMINATIM_PAUSA_MS` - Pausa entre requests (ms)
+- `HTTP_TIMEOUT_SEG` - Timeout HTTP
+
+### Extensibilidad: Agregar proveedores
+
+Para agregar un nuevo proveedor (ej. Google Maps, Mapbox, Azure Maps):
+
+1. Implementar `GeocodingProvider`
+2. Agregar al chain en `GeocodingConfig.crearChain()` en el orden deseado
+3. El chain maneja automáticamente fallback, cuotas y batching
+
+```java
+// Ejemplo: cadena personalizada para tests
+GeocodingChain chain = new GeocodingChain(List.of(
+    new MiProveedorPrincipal(),
+    new MiProveedorFallback()
+));
+GeocodingEngine engine = GeocodingEngine.crear(chain);
+```
+
+### Integración con VRP Engine
+
+El flujo típico de uso combinado:
+
+```java
+// 1. Geocodificar direcciones externas
+GeocodingEngine geoEngine = GeocodingEngine.crear(cfg);
+Map<String, Coordenada> coords = geoEngine.geocodificarExigiendoExito(solicitudes);
+
+// 2. Construir problema VRP con coordenadas
+ProblemaVRP problema = new ProblemaVRP(fecha, depositos, entregasConCoords, vehiculos);
+
+// 3. Planificar con VRP Engine puro
+VrpEngine vrpEngine = VrpEngine.crear(vrpConfig);
+ResultadoFase2 fase2 = vrpEngine.planificar(problema);
+```
+
+Esto mantiene la **separación de responsabilidades**: geocodificación externa, ruteo puro interno.
+
+## Flujo de ejecución
+
+El motor nunca lanza excepciones por datos inválidos: devuelve resultados estructurados.
+
+```
+Archivo -> Lectura y validación -> Cálculo de matriz -> Solver OR-Tools -> Confirmación
+```
+
+**Lectura y validación** (`ResultadoLectura`): errores por fila o por campo (coordenadas faltantes, ids duplicados, ventana invertida, vehículo sin hora de salida, depósito inexistente, etc.).
+
+**Cálculo de matriz y planificación** (`Planificador.planificar` / `VrpEngine.planificar`). Solo se ejecuta con todas las coordenadas válidas. Pide la matriz a Valhalla y completa los pares sin ruta con OSRM. Resultados posibles:
+- `RutaImposible`: quedan pares de puntos sin ruta incluso tras el fallback. Se informa qué pares son.
 - `ProveedorNoDisponible`: ningún servicio de ruteo respondió.
+- `ProblemaInvalido`: datos estructurales incorrectos.
 - `PlanGenerado`: el plan, con estado `valido` o `requiere_confirmacion`.
 
-**Confirmación** (`Planificador.confirmar`). Si el solver omitió entregas (capacidad, ventanas, jornada o restricciones combinadas), el plan queda en `requiere_confirmacion`. Solo pasa a `confirmado` si se aceptan explícitamente todos los ids omitidos.
+**Confirmación** (`Planificador.confirmar` / `VrpEngine.confirmar`). Si el solver omitió entregas (capacidad, ventanas, jornada o restricciones combinadas), el plan queda en `requiere_confirmacion`. Solo pasa a `confirmado` si se aceptan explícitamente todos los ids omitidos.
 
 ## Uso desde Java (Fachada VrpEngine)
 
@@ -201,13 +321,13 @@ La forma recomendada es usar la fachada `VrpEngine` que expone funciones separad
 
 ```java
 ConfiguracionMotor cfg = ConfiguracionMotor.desdeArchivo(Path.of("config.properties"));
-VrpEngine engine = VrpEngine.crear(cfg);  // Usa HttpTransporteJdk por defecto
+VrpEngine engine = VrpEngine.crear(cfg);  // Sin cliente HTTP explícito, usa java.net.http nativo
 
 // 1. Leer archivo (CSV, Excel, XML, JSON)
 ContextoOperativo contexto = VrpEngine.contextoDefecto(
         LocalDate.now(),
         List.of(VrpEngine.deposito("D1", "Central",
-                VrpEngine.direccion("Av. Rivadavia 17000", "Haedo", "Buenos Aires"),
+                new Coordenada(-34.6410, -58.5900),
                 LocalTime.of(6, 0), LocalTime.of(22, 0), 30)),
         List.of(VrpEngine.vehiculo("V1", "Camión 1", 20,
                 LocalTime.of(8, 0), LocalTime.of(18, 0), "D1", "D1", 1))
@@ -216,29 +336,24 @@ ContextoOperativo contexto = VrpEngine.contextoDefecto(
 ResultadoLectura lectura = engine.leerArchivo(Path.of("clientes.csv"), contexto);
 if (!lectura.errores().isEmpty()) { /* manejar errores */ }
 
-// 2. Geocodificar (Fase 1) - Georef hasta 1000, luego Nominatim
-ResultadoFase1 fase1 = engine.geocodificar(lectura.problema());
-if (fase1 instanceof DireccionesInvalidas d) { /* manejar errores */ }
-if (fase1 instanceof ProblemaInvalido p) { /* manejar errores */ }
-ProblemaVRP problema = ((Geocodificado) fase1).problema();
+// 2. Calcular matriz (opcional, para inspección)
+MatrizRuteo matriz = engine.calcularMatriz(lectura.problema().coordenadasTodas());
 
-// 3. Calcular matriz (opcional, para inspección)
-MatrizRuteo matriz = engine.calcularMatriz(problema.coordenadasTodas());  // requiere método helper
-
-// 4. Planificar (Fase 2)
-ResultadoFase2 fase2 = engine.planificar(problema);
+// 3. Planificar (el problema YA debe tener coordenadas)
+ResultadoFase2 fase2 = engine.planificar(lectura.problema());
 if (fase2 instanceof RutaImposible r) { /* manejar errores */ }
 if (fase2 instanceof ProveedorNoDisponible p) { /* manejar errores */ }
+if (fase2 instanceof ProblemaInvalido p) { /* manejar errores */ }
 PlanDeRuteo plan = ((PlanGenerado) fase2).plan();
 
-// 5. Confirmar si hay omisiones
+// 4. Confirmar si hay omisiones
 if (plan.estado() == EstadoPlan.REQUIERE_CONFIRMACION) {
     Set<String> aceptadas = plan.omisiones().stream()
             .map(Omision::entregaId).collect(Collectors.toSet());
     plan = engine.confirmar(plan, aceptadas);
 }
 
-// 6. Codificar/guardar plan
+// 5. Codificar/guardar plan
 String json = engine.codificarPlan(plan);
 Files.writeString(Path.of("plan.json"), json);
 
@@ -252,13 +367,12 @@ ResultadoPlanificacion reopt = engine.reoptimizar(plan, cambios);
 
 **Funciones separadas disponibles en `VrpEngine`:**
 - `leerArchivo`, `leerJson` — Lectura de archivos
-- `geocodificar`, `geocodificarDirecciones` — Fase 1
 - `calcularMatriz`, `obtenerGeometria` — Matriz y geometría
-- `planificar` — Fase 2 (con o sin posiciones GPS)
+- `planificar` — Planificación (con o sin posiciones GPS)
 - `confirmar` — Aceptar omisiones
 - `reoptimizar` — Reoptimización mid-jornada
 - `codificarPlan`, `decodificarPlan` — JSON I/O
-- Métodos helper: `contextoDefecto`, `direccion`, `entrega`, `vehiculo`, `deposito`
+- Métodos helper: `contextoDefecto`, `entrega`, `vehiculo`, `deposito`
 
 Para leer JSON completo: `engine.leerJson(jsonString, contexto)` o `engine.leerArchivo(Path.of("problema.json"), null)`.
 
@@ -308,32 +422,15 @@ El plan se serializa con `JsonSupport.mapper()`. Los enums van en minúscula y l
 - Estados de parada: ver la tabla de la sección de reoptimización.
 - Los depósitos no aparecen como paradas.
 
-Los resultados de cada fase también se serializan con un campo `resultado` que indica el tipo, por ejemplo:
-
-```json
-{
-  "resultado": "direcciones_invalidas",
-  "errores": [
-    {
-      "entidadId": "E3",
-      "tipo": "entrega",
-      "direccion": { "direccion": "Calle Inexistente 1", "localidad": "Merlo", "provincia": "Buenos Aires" },
-      "motivo": "no_encontrada",
-      "detalle": "georef: Georef no encontro la direccion | nominatim: Nominatim no encontro resultados",
-      "proveedoresIntentados": ["georef", "nominatim"]
-    }
-  ]
-}
-```
-
 ## Reoptimización durante la jornada
 
 Se usa cuando los camiones **ya salieron**, es decir, ya llevan la mercadería cargada. Por eso:
 
-- **No se pueden agregar clientes** a un plan en marcha: la mercadería no está en los camiones. Un cliente nuevo implica generar un plan nuevo (Fase 1 y 2).
+- **No se pueden agregar clientes** a un plan en marcha: la mercadería no está en los camiones. Un cliente nuevo implica generar un plan nuevo.
 - Solo se recalcula la ruta **del chofer que tiene al cliente afectado**. Las rutas de los demás choferes, con sus paradas, ETA y polilíneas, quedan idénticas.
 - Un cliente no puede pasar de un camión a otro.
 - **Solo se recalculan las paradas pendientes o postergadas.** Las demás salen de la ruta.
+- **No se permite modificar direcciones** (el motor requiere coordenadas). Si se necesita cambiar una dirección, geocodificar externamente y pasar las nuevas coordenadas.
 
 ### Estados de parada
 
@@ -348,47 +445,23 @@ Se usa cuando los camiones **ya salieron**, es decir, ya llevan la mercadería c
 
 Al reoptimizar, las paradas pendientes recalculadas quedan como `pendiente`, salvo la primera si ya estaba `en_camino` en ese mismo vehículo.
 
-Como las paradas cerradas salen de la ruta al reoptimizarla, el historial de entregas debe conservarse en el sistema de pedidos.
-
-Hay dos formas de cambiar estados, según quién origina el evento (ver la sección siguiente).
-
 ### Qué dispara el recálculo de una ruta
 
 1. Una parada con estado `devolver_a_deposito`.
 2. Una parada con estado `reprogramado`.
-3. Una `ModificacionEntrega` sobre alguno de sus clientes.
+3. Una `ModificacionEntrega` sobre alguno de sus clientes (ventana, prioridad, servicioMin).
 
-Las acciones `devolverADeposito` y `reprogramar` de `CambiosJornada` aplican el estado correspondiente y recalculan en una sola operación, así que no hace falta editar el JSON antes.
+Las acciones `devolverADeposito` y `reprogramar` de `CambiosJornada` aplican el estado correspondiente y recalculan en una sola operación.
 
 Si ninguna ruta cumple alguna de estas condiciones, el plan se devuelve sin cambios. Las rutas que no se recalculan conservan todo tal cual, incluso sus paradas ya entregadas.
 
 ### Modificaciones permitidas
 
 `ModificacionEntrega` admite, por cliente (los campos en `null` no cambian):
-
 - `ventana`: nueva ventana horaria, o `quitarVentana = true` para eliminarla.
 - `prioridad` y `servicioMin`.
-- `direccion`: se geocodifica solo esa dirección. Si no se resuelve, el resultado es `DireccionesInvalidas` y el plan no se modifica.
 
 La demanda no se puede modificar, porque la mercadería ya está cargada. Solo se pueden modificar clientes en estado `pendiente`, `reprogramado` o `en_camino`.
-
-### Acciones de la web y eventos del chofer
-
-**Acciones de la web** (recalculan la ruta). Van dentro de `CambiosJornada`:
-
-- `devolverADeposito`: lista de ids de entrega cancelados desde el depósito. La parada sale de la ruta y la mercadería vuelve al depósito con el camión.
-- `reprogramar`: lista de `Reprogramacion(entregaId, ventana)`. La reprogramación es **siempre dentro de la misma jornada**, con una ventana horaria nueva opcional. Si el cliente pasa la entrega a otro día, la mercadería vuelve al depósito y se carga de nuevo ese día: se usa `devolverADeposito`.
-
-El motor valida las acciones: la entrega debe existir y estar `pendiente`, `en_camino` o `reprogramado`; no puede repetirse ni estar a la vez en devolver y reprogramar, ni modificarse si se devuelve.
-
-**Eventos del chofer** (no recalculan nada). Se aplican sobre el plan con `PlanDeRuteo.conEstadoDeParada(entregaId, estado)`, que devuelve un plan nuevo:
-
-- Estados permitidos: `pendiente`, `en_camino`, `entregado` y `cancelado` (en puerta).
-- Un estado cerrado (`entregado`, `cancelado`, `devolver_a_deposito`) no se puede reabrir.
-- `reprogramado` y `devolver_a_deposito` no se aplican por este método, porque recalculan: se hacen con `CambiosJornada`.
-- Si el cambio no es válido (entrega inexistente, estado cerrado, estado no permitido), lanza `IllegalArgumentException`.
-
-El motor no guarda nada: recibe un plan y devuelve otro. Guardarlo le corresponde a quien lo consuma (la futura API).
 
 ### Ejemplo
 
@@ -402,21 +475,12 @@ plan = plan.conEstadoDeParada("E1", EstadoParada.ENTREGADO);
 CambiosJornada cambios = new CambiosJornada(
         LocalDateTime.now(),
         List.of(new PosicionVehiculo("V1", new Coordenada(-34.66, -58.73), LocalDateTime.now())),
-        List.of(new ModificacionEntrega("E5", null, false, 3, null, null)),               // prioridad nueva
+        List.of(new ModificacionEntrega("E5", null, false, 3, null)),               // prioridad nueva
         List.of("E3"),                                                                     // devolver al depósito
         List.of(new Reprogramacion("E4", new VentanaHoraria(LocalTime.of(15, 0), LocalTime.of(17, 0)))));
 
 ResultadoPlanificacion resultado = new Reoptimizador(planificador).reoptimizar(plan, cambios);
 ```
-
-### Reglas
-
-- La ruta afectada parte de la **posición GPS** reportada del chofer. Si no hay, usa la última posición conocida del plan o, en su defecto, la de la última parada cerrada. Termina en su depósito de llegada, que por defecto es el de salida.
-- La matriz solo incluye los puntos de esa ruta: depósito, posición del chofer y clientes pendientes.
-- Como la mercadería ya está a bordo, la capacidad nunca es un motivo de omisión en la reoptimización. Sí pueden omitirse clientes por ventanas o fin de jornada: se omiten primero los de menor prioridad, y el plan queda en `requiere_confirmacion`.
-- En una ruta reoptimizada, `distanciaTotalM` y `duracionTotalSeg` corresponden al tramo restante desde la posición del chofer.
-- Si hubo cambios, el plan resultante tiene `version` incrementada.
-- Si algo falla (cambio sobre una parada cerrada, id inexistente, dirección que no se resuelve, ruta imposible), no se modifica nada y se devuelve el error correspondiente.
 
 ## Cómo decide el solver
 
@@ -430,56 +494,74 @@ ResultadoPlanificacion resultado = new Reoptimizador(planificador).reoptimizar(p
 
 ## Estructura del proyecto
 
-Proyecto multi-módulo Maven:
+Proyecto Maven **multi-módulo**:
 
 ```
-vrp-parent/                 # POM padre
-├── vrp-engine/             # Librería principal
+vrp-parent/                 # POM padre (dependency management)
+├── pom.xml                 # Configuración común: Java 25, dependencias, plugins
+├── vrp-engine/             # Módulo: Motor de ruteo puro (VRP)
+│   ├── pom.xml
+│   ├── config.properties   # Config VRP (Valhalla, OSRM, Solver)
 │   └── src/main/java/vrp/engine/
-│       ├── model/          # Deposito(ventana,estadia), Entrega, Vehiculo(maxViajes), ProblemaVRP...
+│       ├── model/          # Deposito, Entrega, Vehiculo, ProblemaVRP, Coordenada...
 │       ├── io/             # Lectores (JSON, CSV, Excel, XML), ProblemReaderFactory, JsonSupport
-│       ├── geocoding/      # GeorefProvider(lotes 1000), NominatimLocalProvider, GeocodingChain(cuota)
 │       ├── routing/        # ValhallaClient, OsrmClient, MatrixChain, GeometryChain, MatrizRuteo
 │       ├── solver/         # OrToolsVrpSolver, ModeloBuilder, Simulador, ArcosRelevantes
-│       ├── plan/           # PlanDeRuteo, RutaVehiculo, Parada(tipo ENTREGA/DEPOSITO), Omision...
-│       ├── resultado/      # ResultadoFase1/2, Geocodificado, PlanGenerado, DireccionesInvalidas...
+│       ├── plan/           # PlanDeRuteo, RutaVehiculo, Parada, Omision...
+│       ├── resultado/      # ResultadoFase2, PlanGenerado, RutaImposible, ProveedorNoDisponible, ProblemaInvalido
 │       ├── service/        # Planificador, Reoptimizador, ConstructorPlan, VrpEngine(fachada)...
-│       ├── config/         # ConfiguracionMotor (record, desde .properties)
-│       ├── http/           # HttpTransporte, HttpTransporteJdk
+│       ├── config/         # ConfiguracionMotor (record, .properties + env vars)
 │       └── util/           # Polyline6, Tiempos
-└── vrp-manual-tests/       # Módulo de pruebas con Main
-    └── src/main/java/vrp/manual/Main.java  # 12+ escenarios de prueba
+├── geocoding-engine/       # Módulo: Motor de geocodificación independiente
+│   ├── pom.xml
+│   ├── geocoding.properties # Config Geocoding (Georef, Nominatim)
+│   └── src/main/java/vrp/geocoding/
+│       ├── GeocodingEngine.java        # Fachada principal
+│       ├── GeocodingChain.java         # Cadena de proveedores con fallback
+│       ├── GeocodingProvider.java      # Interfaz de proveedor
+│       ├── GeocodingConfig.java        # Configuración
+│       ├── GeorefProvider.java         # Proveedor Georef (cuota 1000/día, batch)
+│       ├── NominatimProvider.java      # Proveedor Nominatim (rate-limited)
+│       ├── Direccion.java              # Dirección estructurada
+│       ├── SolicitudGeocodificacion.java # Solicitud con ID
+│       ├── ResultadoGeocodificacion.java # Resultado sellado (Exitoso/Fallido)
+│       └── Coordenada.java             # Lat/Lon con validación
 ```
 
-Interfaces para testabilidad e inyección: `GeocodingProvider`, `RoutingMatrixProvider`, `RouteGeometryProvider`, `VrpSolver`, `ProblemReader`, `HttpTransporte`.
+**Dependencias entre módulos**: Ninguna (son independientes).
+- `vrp-engine` depende de: Jackson, SLF4J, OR-Tools, POI, Commons CSV
+- `geocoding-engine` depende de: Jackson, SLF4J
 
-**Código legacy eliminado** (estaba en `vrp.legacy` en la versión original).
+Interfaces para testabilidad e inyección:
+- VRP: `RoutingMatrixProvider`, `RouteGeometryProvider`, `VrpSolver`, `ProblemReader`
+- Geocoding: `GeocodingProvider`
 
 ## Tests
 
 ```bash
-# Tests unitarios e integración (vrp-engine)
+# Tests de todos los módulos (desde raíz)
 mvn test
 
-# Pruebas manuales con Main (vrp-manual-tests)
-mvn exec:java -pl vrp-manual-tests -Dexec.mainClass=vrp.manual.Main
+# Tests solo VRP Engine
+mvn test -pl vrp-engine
+
+# Tests solo Geocoding Engine
+mvn test -pl geocoding-engine
 ```
 
-**Tests automatizados (54):** lectura 4 formatos, geocodificación en cadena (cuota 1000), matrices bloques/fallback, Fase 1 y 2, omisiones/confirmación, reoptimización por ruta, polyline6, estados parada.
+**VRP Engine (vrp-engine):** lectura 4 formatos, matrices bloques/fallback, planificación, omisiones/confirmación, reoptimización por ruta, polyline6, estados parada.
 
-**Main manual (vrp-manual-tests):** 12 escenarios que cubren modelos, JSON, geocodificación, matriz, planificación, codificación/decodificación, paradas depósito, reoptimización, multi-vehículo maxViajes, motivo capacidad_insuficiente, cuota Georef, fachada VrpEngine.
+**Geocoding Engine (geocoding-engine):** Georef batch/cuota, Nominatim rate-limiting, cadena fallback, batching inteligente.
 
 `OrToolsVrpSolverTest` usa solver real (requiere librerías nativas OR-Tools).
 
 ## Limitaciones y pendientes
 
 - No hay API web ni CLI: el motor se usa desde código Java (fachada `VrpEngine` lista para Spring/Quarkus).
-- Parámetros Georef (`provincia`, `localidad`) según doc; verificar con tus localidades.
-- Sin caché de geocodificación: cada ejecución consulta de nuevo. Cuotas Georef: 10 qps, 40/min, 2000/h, 10000/día (externos).
 - Un par sin ruta (tras fallback) bloquea el plan (por diseño).
 - Reoptimización no admite clientes nuevos (mercadería ya cargada); requiere plan nuevo.
+- No se puede modificar dirección en reoptimización (requiere coordenadas).
 - Paradas cerradas salen del plan al reoptimizar; historial en sistema de pedidos.
 - Horarios en un día, sin zona horaria.
-- Sin logs/eventos.
-- Pendientes: compatibilidad vehículo-cliente, pickups+deliveries, **múltiples viajes por vehículo** (modelo `maxViajes` existe, solver pendiente), caché de geocodificación, API web de ejemplo.
-
+- Sin caché de geocodificación: geocodificar externamente antes de usar el motor.
+- Pendientes: compatibilidad vehículo-cliente, pickups+deliveries, **múltiples viajes por vehículo** (modelo `maxViajes` existe, solver pendiente), API web de ejemplo.
