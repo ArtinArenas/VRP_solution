@@ -20,7 +20,8 @@ public record ModeloRuteo(
         long[] servicioSeg,
         long[] desdeSeg,
         long[] hastaSeg,
-        long[] penalizacion) {
+        long[] penalizacion,
+        long[] estadiaDepositoSeg) {
 
     public static final long HORIZONTE_SEG = 172_800L;
 
@@ -37,5 +38,14 @@ public record ModeloRuteo(
     /** Entrega correspondiente a un nodo cliente. */
     public Entrega entregaDeNodo(int nodo) {
         return entregas.get(nodo - primerNodoEntrega);
+    }
+
+    /** Tiempo de estadía en depósito (segundos) para un vehículo virtual.
+     *  Devuelve 0 si no hay estadía configurada o el índice es inválido. */
+    public long estadiaDepositoSeg(int vehiculoVirtual) {
+        if (estadiaDepositoSeg == null || vehiculoVirtual < 0 || vehiculoVirtual >= estadiaDepositoSeg.length) {
+            return 0L;
+        }
+        return estadiaDepositoSeg[vehiculoVirtual];
     }
 }

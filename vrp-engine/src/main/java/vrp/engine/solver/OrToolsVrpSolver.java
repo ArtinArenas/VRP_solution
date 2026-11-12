@@ -11,9 +11,21 @@ import com.google.ortools.constraintsolver.RoutingSearchParameters;
 import com.google.ortools.constraintsolver.main;
 import com.google.protobuf.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import vrp.engine.routing.MatrizRuteo;
 
+/**
+ * Solver VRP basado en OR-Tools con soporte para:
+ * - Capacidad heterogénea por vehículo
+ * - Ventanas horarias en clientes y depósitos
+ * - Jornada laboral (horaSalida/horaFin)
+ * - Omisión penalizada de clientes
+ * - Balanceo opcional de rutas
+ * - <b>Múltiples viajes por vehículo (maxViajes)</b>: virtualiza vehículos en copias/turnos
+ *   y añade tiempo de estadía en depósito entre viajes consecutivos.
+ */
 public final class OrToolsVrpSolver implements VrpSolver {
 
     private static final String DIM_TIEMPO = "Tiempo";
@@ -37,15 +49,34 @@ public final class OrToolsVrpSolver implements VrpSolver {
         RoutingIndexManager manager = new RoutingIndexManager(n, nv, modelo.inicios(), modelo.fines());
         RoutingModel routing = new RoutingModel(manager);
 
+        // Mapa: nodo de fin (índice de nodo) -> índice de vehículo virtual
+        // Usado en el callback de tiempo para saber qué vehículo llega al depósito.
+        Map<Integer, Integer> nodoFinAVehiculo = new HashMap<>();
+        for (int v = 0; v < nv; v++) {
+            nodoFinAVehiculo.put(modelo.fines()[v], v);
+        }
+
         final int costoCb = routing.registerTransitCallback((long desde, long hasta) ->
                 costo[manager.indexToNode(desde)][manager.indexToNode(hasta)]);
         routing.setArcCostEvaluatorOfAllVehicles(costoCb);
 
         // Tiempo de tránsito: viaje más el servicio en el nodo de origen.
+        // Para arcos que vuelven al depósito, incluir tiempo de estadía (carga/descarga).
         final int tiempoCb = routing.registerTransitCallback((long desde, long hasta) -> {
             int a = manager.indexToNode(desde);
             int b = manager.indexToNode(hasta);
-            return tiempo[a][b] + modelo.servicioSeg()[a];
+            long tiempoTransito = tiempo[a][b] + modelo.servicioSeg()[a];
+
+            // Si el arco termina en un nodo de fin (depósito de llegada), añadir estadía
+            // Esto modela el tiempo de carga/descarga en el depósito entre viajes.
+            Integer vehiculoVirtual = nodoFinAVehiculo.get(b);
+            if (vehiculoVirtual != null) {
+                long estadia = modelo.estadiaDepositoSeg(vehiculoVirtual);
+                if (estadia > 0) {
+                    tiempoTransito += estadia;
+                }
+            }
+            return tiempoTransito;
         });
         routing.addDimension(tiempoCb, ModeloRuteo.HORIZONTE_SEG, ModeloRuteo.HORIZONTE_SEG, false, DIM_TIEMPO);
         RoutingDimension dimTiempo = routing.getMutableDimension(DIM_TIEMPO);

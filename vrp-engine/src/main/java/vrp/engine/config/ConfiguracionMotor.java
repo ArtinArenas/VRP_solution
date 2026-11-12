@@ -21,7 +21,7 @@ public record ConfiguracionMotor(
 
     /** Extrae los parámetros que usa el solver. */
     public ParametrosSolver parametrosSolver() {
-        return new ParametrosSolver(objetivo, tiempoLimiteSolverSeg, penalizacionBase, coeficienteBalanceo);
+        return new ParametrosSolver(objetivo, tiempoLimiteSolverSeg, penalizacionBase, coeficienteBalanceo, true);
     }
 
     /** Carga la configuración desde un archivo .properties. */

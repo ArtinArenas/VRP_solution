@@ -2,7 +2,7 @@
 
 Motor de enrutamiento de vehículos (VRP) para logística. Librería Java modular, testeable y diseñada para ser consumida por una API web. JSON es el formato de intercambio.
 
-**Novedad v2.0**: El motor ahora es un **motor de ruteo puro** que trabaja exclusivamente con coordenadas (latitud/longitud). La geocodificación se ha extraído completamente y debe realizarse externamente antes de usar el motor.
+**Novedad v2.1**: El motor es un **motor de ruteo puro** que trabaja exclusivamente con coordenadas (latitud/longitud). La geocodificación se ha extraído completamente y debe realizarse externamente. **Novedades v2.1**: Soporte nativo para **múltiples viajes por vehículo (`maxViajes`)** y **manejo de puntos desconectados (`Solver.permitirPuntosDesconectados`)**.
 
 ## Contenido
 
@@ -26,13 +26,16 @@ Motor de enrutamiento de vehículos (VRP) para logística. Librería Java modula
 - **Fachada `VrpEngine`**: expone funciones para leer archivos, calcular matriz de distancias/tiempos, planificar rutas, codificar/decodificar planes.
 - Lee clientes desde **CSV, Excel (.xls/.xlsx), XML o JSON** con coordenadas obligatorias (lat/lon).
 - Calcula **matriz de distancias/tiempos** con Valhalla (primario) y OSRM (fallback).
-- Resuelve con **OR-Tools** para `n` vehículos heterogéneos: capacidad, ventanas, tiempos de servicio, prioridades, **balanceo opcional**. Modelo `maxViajes` existe en vehículo (solver pendiente).
+- Resuelve con **OR-Tools** para `n` vehículos heterogéneos: capacidad, ventanas, tiempos de servicio, prioridades, **balanceo opcional**.
+- **Múltiples viajes por vehículo (`maxViajes`)**: un mismo vehículo puede realizar varios circuitos (salida del depósito → entregas → retorno al depósito) dentro de su jornada, respetando el tiempo de estadía en depósito entre viajes.
+- **Manejo de puntos desconectados (`Solver.permitirPuntosDesconectados`)**: si la matriz de ruteo no encuentra ruta entre ciertos pares (zonas inaccesibles, islas, fallos de red vial), omite automáticamente esas entregas con motivo `SIN_RUTA` y resuelve con las restantes (configurable, por defecto activado).
 - **Depósitos con ventana horaria y tiempo de estadía** (carga/descarga). Visitas a depósito en mitad de ruta permitidas.
 - Paradas con tipo `ENTREGA` o `DEPOSITO`.
 - Si no puede atender un cliente, lo informa como omisión y exige confirmación explícita.
 - Plan en JSON con estado por parada; **reoptimización mid-jornada** desde posición GPS del chofer.
 - **Logging SLF4J** para cálculo de matrices y ejecución del solver OR-Tools.
 - **Configuración vía variables de entorno** con fallback a `config.properties`.
+- **Serialización JSON robusta con Jackson**: JavaTimeModule (ISO-8601), LOWER_CAMEL_CASE, enums en minúscula, tolerante a campos desconocidos, soporte nativo para records Java 25 y tipos polimórficos (sealed interfaces).
 
 ## Estado actual
 
@@ -42,13 +45,15 @@ Motor de enrutamiento de vehículos (VRP) para logística. Librería Java modula
 | Valhalla, OSRM (clientes HTTP nativos Java 25) | ✅ Implementado |
 | Solver OR-Tools (`OrToolsVrpSolver`) | ✅ Implementado |
 | Fachada `VrpEngine` pura (sin geocodificación) | ✅ Implementado |
-| Múltiples viajes por vehículo (`maxViajes`) | ⏳ Modelo listo, solver pendiente |
+| Múltiples viajes por vehículo (`maxViajes`) | ✅ Implementado (nativo en OR-Tools) |
+| Puntos desconectados (`Solver.permitirPuntosDesconectados`) | ✅ Implementado (pre-filtrado SRP) |
+| Serialización JSON Java 25 (records, sealed, JavaTimeModule) | ✅ Implementado |
 | API web, línea de comandos, persistencia | ❌ No existen (diseñado para API) |
 
 ## Requisitos
 
 - **Java 25 LTS** y Maven 3.9+.
-- Dependencias: Jackson 2.22, Apache POI 5.5, Commons CSV 1.14, OR-Tools Java 9.15, SLF4J 2.0, JUnit 5.11.
+- Dependencias: Jackson 2.22 (incl. jackson-datatype-jsr310), Apache POI 5.5, Commons CSV 1.14, OR-Tools Java 9.15, SLF4J 2.0, JUnit 5.11.
 - Servicios externos (al menos uno obligatorio para ruteo):
   - **Valhalla** local (puerto 8002 por defecto)
   - **OSRM** local (puerto 5000 por defecto)
@@ -307,13 +312,17 @@ Archivo -> Lectura y validación -> Cálculo de matriz -> Solver OR-Tools -> Con
 
 **Lectura y validación** (`ResultadoLectura`): errores por fila o por campo (coordenadas faltantes, ids duplicados, ventana invertida, vehículo sin hora de salida, depósito inexistente, etc.).
 
-**Cálculo de matriz y planificación** (`Planificador.planificar` / `VrpEngine.planificar`). Solo se ejecuta con todas las coordenadas válidas. Pide la matriz a Valhalla y completa los pares sin ruta con OSRM. Resultados posibles:
-- `RutaImposible`: quedan pares de puntos sin ruta incluso tras el fallback. Se informa qué pares son.
+**Cálculo de matriz y planificación** (`Planificador.planificar` / `VrpEngine.planificar`). Solo se ejecuta con todas las coordenadas válidas. Pide la matriz a Valhalla y completa los pares sin ruta con OSRM.
+- **Filtrado de puntos desconectados**: antes de invocar el solver, el componente `FiltradorNodosInalcanzables` detecta entregas sin conectividad hacia/desde los depósitos. **Este comportamiento se controla pasando el parámetro `permitirPuntosDesconectados` (true/false) a la función `planificar()`**.
+  - Si `permitirPuntosDesconectados=true`: omite esas entregas con motivo `SIN_RUTA` y resuelve con las restantes.
+  - Si `permitirPuntosDesconectados=false`: retorna `RutaImposible`.
+Resultados posibles:
+- `RutaImposible`: quedan pares de puntos sin ruta incluso tras el fallback (o nodos inalcanzables en modo estricto). Se informa qué pares son.
 - `ProveedorNoDisponible`: ningún servicio de ruteo respondió.
 - `ProblemaInvalido`: datos estructurales incorrectos.
-- `PlanGenerado`: el plan, con estado `valido` o `requiere_confirmacion`.
+- `PlanGenerado`: el plan, con estado `valido` o `requiere_confirmacion`. Las omisiones por `SIN_RUTA` se incluyen en la lista de omisiones.
 
-**Confirmación** (`Planificador.confirmar` / `VrpEngine.confirmar`). Si el solver omitió entregas (capacidad, ventanas, jornada o restricciones combinadas), el plan queda en `requiere_confirmacion`. Solo pasa a `confirmado` si se aceptan explícitamente todos los ids omitidos.
+**Confirmación** (`Planificador.confirmar` / `VrpEngine.confirmar`). Si el solver omitió entregas (capacidad, ventanas, jornada, restricciones combinadas o `SIN_RUTA`), el plan queda en `requiere_confirmacion`. Solo pasa a `confirmado` si se aceptan explícitamente todos los ids omitidos.
 
 ## Uso desde Java (Fachada VrpEngine)
 
@@ -368,13 +377,27 @@ ResultadoPlanificacion reopt = engine.reoptimizar(plan, cambios);
 **Funciones separadas disponibles en `VrpEngine`:**
 - `leerArchivo`, `leerJson` — Lectura de archivos
 - `calcularMatriz`, `obtenerGeometria` — Matriz y geometría
-- `planificar` — Planificación (con o sin posiciones GPS)
+- `planificar` — Planificación (**requiere parámetro `permitirPuntosDesconectados`**)
+  - `planificar(ProblemaVRP, boolean permitirPuntosDesconectados)`
+  - `planificar(ProblemaVRP, Map<String, Coordenada> posiciones, long ahoraSeg, int version, boolean permitirPuntosDesconectados)`
 - `confirmar` — Aceptar omisiones
 - `reoptimizar` — Reoptimización mid-jornada
 - `codificarPlan`, `decodificarPlan` — JSON I/O
 - Métodos helper: `contextoDefecto`, `entrega`, `vehiculo`, `deposito`
 
 Para leer JSON completo: `engine.leerJson(jsonString, contexto)` o `engine.leerArchivo(Path.of("problema.json"), null)`.
+
+**Ejemplo con `permitirPuntosDesconectados` obligatorio:**
+```java
+// Planificar con puntos desconectados permitidos (omite entregas sin ruta)
+ResultadoFase2 fase2 = engine.planificar(lectura.problema(), true);
+
+// Planificar en modo estricto (falla si hay nodos inalcanzables)
+ResultadoFase2 fase2 = engine.planificar(lectura.problema(), false);
+
+// Con posiciones GPS y parámetros completos
+ResultadoFase2 fase2 = engine.planificar(problema, posiciones, ahoraSeg, version, true);
+```
 
 ## Formato de salida
 
@@ -488,9 +511,13 @@ ResultadoPlanificacion resultado = new Reoptimizador(planificador).reoptimizar(p
 - **Capacidad**: cada vehículo tiene la suya y la suma de demandas de su ruta no puede superarla.
 - **Ventanas horarias**: el vehículo puede esperar si llega antes; si llega tarde, no es válido.
 - **Jornada**: `horaFin` es un límite duro para el regreso al depósito.
+- **Múltiples viajes (`maxViajes`)**: si un vehículo tiene `maxViajes > 1`, el solver virtualiza el vehículo en tantas copias como viajes. Cada copia (viaje) sale del depósito, atiende entregas, vuelve al depósito (sumando el tiempo de `estadiaMin` para carga/descarga) y puede iniciar el siguiente viaje. La suma de tiempos de todos los viajes no puede exceder la jornada (`horaSalida` a `horaFin`).
+- **Puntos desconectados (`permitirPuntosDesconectados` como parámetro)**: antes de resolver, el pre-filtrado `FiltradorNodosInalcanzables` detecta entregas sin ruta hacia/desde los depósitos. **El comportamiento se controla pasando el parámetro `permitirPuntosDesconectados` (true/false) a la función `planificar()`**.
+  - Si `permitirPuntosDesconectados=true`: omite esas entregas con motivo `SIN_RUTA` y resuelve con las restantes.
+  - Si `permitirPuntosDesconectados=false`: retorna `RutaImposible`.
 - **Omisiones**: cada entrega puede omitirse pagando una penalización de `Solver.penalizacionBase × prioridad`. El valor por defecto es alto para que omitir sea el último recurso. Una prioridad mayor hace más costoso omitir ese cliente.
 - **Balanceo**: con `Solver.coeficienteBalanceo` mayor que 0 se penaliza la diferencia entre la ruta más larga y la más corta, lo que reparte mejor las entregas entre vehículos. Con 0, el solver puede concentrar todo en pocos vehículos si eso reduce la distancia total.
-- **Causa de las omisiones**: el plan indica un motivo aproximado (`capacidad_individual`, `ventana_horaria_imposible`, `restricciones_combinadas`, `sin_solucion`).
+- **Causa de las omisiones**: el plan indica un motivo aproximado (`capacidad_individual`, `ventana_horaria_imposible`, `restricciones_combinadas`, `sin_solucion`, `sin_ruta`).
 
 ## Estructura del proyecto
 
@@ -558,10 +585,10 @@ mvn test -pl geocoding-engine
 ## Limitaciones y pendientes
 
 - No hay API web ni CLI: el motor se usa desde código Java (fachada `VrpEngine` lista para Spring/Quarkus).
-- Un par sin ruta (tras fallback) bloquea el plan (por diseño).
+- Un par sin ruta (tras fallback) bloquea el plan en modo estricto (`permitirPuntosDesconectados=false` en la llamada a `planificar()`).
 - Reoptimización no admite clientes nuevos (mercadería ya cargada); requiere plan nuevo.
 - No se puede modificar dirección en reoptimización (requiere coordenadas).
 - Paradas cerradas salen del plan al reoptimizar; historial en sistema de pedidos.
 - Horarios en un día, sin zona horaria.
 - Sin caché de geocodificación: geocodificar externamente antes de usar el motor.
-- Pendientes: compatibilidad vehículo-cliente, pickups+deliveries, **múltiples viajes por vehículo** (modelo `maxViajes` existe, solver pendiente), API web de ejemplo.
+- Pendientes: compatibilidad vehículo-cliente, pickups+deliveries, API web de ejemplo.

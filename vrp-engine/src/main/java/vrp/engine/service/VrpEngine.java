@@ -108,10 +108,11 @@ public final class VrpEngine {
 
     /**
      * Planifica rutas para un problema ya geocodificado (con coordenadas).
+     * @param permitirPuntosDesconectados Si true, omite entregas inalcanzables; si false, falla si hay inalcanzables
      * @return ResultadoFase2: PlanGenerado (éxito) o RutaImposible/ProveedorNoDisponible (error)
      */
-    public ResultadoFase2 planificar(ProblemaVRP problema) {
-        return planificador.planificar(problema, Map.of(), null, 1);
+    public ResultadoFase2 planificar(ProblemaVRP problema, boolean permitirPuntosDesconectados) {
+        return planificar(problema, Map.of(), 0L, 1, permitirPuntosDesconectados);
     }
 
     /**
@@ -119,10 +120,19 @@ public final class VrpEngine {
      * @param posiciones Mapa vehiculoId -> Coordenada (posición GPS actual)
      * @param ahoraSeg Segundos desde inicio de jornada (para ETA)
      * @param version Versión del plan (para reoptimización)
+     * @param permitirPuntosDesconectados Si true, omite entregas inalcanzables; si false, falla si hay inalcanzables
      */
     public ResultadoFase2 planificar(ProblemaVRP problema, Map<String, Coordenada> posiciones,
-                                     long ahoraSeg, int version) {
-        return planificador.planificar(problema, posiciones, ahoraSeg, version);
+                                     long ahoraSeg, int version, boolean permitirPuntosDesconectados) {
+        // Crear parámetros temporales con el valor de permitirPuntosDesconectados
+        ParametrosSolver parametrosBase = planificador.parametros();
+        ParametrosSolver parametrosConOpcion = new ParametrosSolver(
+                parametrosBase.objetivo(),
+                parametrosBase.tiempoLimiteSeg(),
+                parametrosBase.penalizacionBase(),
+                parametrosBase.coeficienteBalanceo(),
+                permitirPuntosDesconectados);
+        return planificador.planificarConParametros(problema, posiciones, ahoraSeg, version, parametrosConOpcion);
     }
 
     /**
